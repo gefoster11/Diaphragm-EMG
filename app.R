@@ -92,6 +92,17 @@ ui <- fluidPage(
 server <- function(input, output, session) {
   
   session$onSessionEnded(function() { stopApp() })
+
+  
+  # --- Helper: build output name from uploaded filename + tag ---
+  make_tagged_name <- function(uploaded_name, tag, forced_ext = "csv") {
+    # uploaded_name: like "subject01.txt" (from input$file$name)
+    # tag: like "EMG" or "RMSpeaks"
+    # forced_ext: output file extension; keep "csv" unless you want to mirror input ext
+    stem <- tools::file_path_sans_ext(basename(uploaded_name))
+    ext  <- if (nzchar(forced_ext)) forced_ext else tools::file_ext(uploaded_name)
+    paste0(stem, "_", tag, if (nzchar(ext)) paste0(".", ext) else "")
+  }
   
 
 # ---- Helper: robust reader that auto-detects delimiter & normalizes ----
@@ -662,21 +673,33 @@ read_emg_file <- function(path) {
     clustered_rms()
   }, digits = 3, striped = TRUE, bordered = TRUE, hover = TRUE)
   
-  # --- Downloads (respect time window + analyzer toggle)
+  
+  # --- Download: RMS Peak Summary ---
   output$downloadRMSPeaks <- downloadHandler(
-    filename = function() { paste0("RMS_clusters_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv") },
-    content  = function(file) { readr::write_csv(clustered_rms(), file) }
+    filename = function() {
+      req(input$file)
+      make_tagged_name(input$file$name, "RMSpeaks", forced_ext = "csv")
+    },
+    content = function(file) {
+      readr::write_csv(clustered_rms(), file)
+    }
   )
   
+  # --- Download: Cleaned EMG + RMS ---
   output$downloadCombined <- downloadHandler(
-    filename = function() { paste0("cleaned_emg_plus_rms_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv") },
-    content  = function(file) {
+    filename = function() {
+      req(input$file)
+      make_tagged_name(input$file$name, "EMG", forced_ext = "csv")
+    },
+    content = function(file) {
       dp <- processed_data()
       req(dp$cleaned_emg, dp$rms, dp$data$time)
       
       time    <- dp$data$time
       cleaned <- dp$cleaned_emg %>% dplyr::mutate(time = time) %>% dplyr::relocate(time)
-      rms_raw <- dp$rms         %>% dplyr::mutate(time = time) %>% dplyr::relocate(time)
+      rms_raw <- dp$rms %>% dplyr::mutate(time = time) %>% dplyr::relocate(time)
+      
+      # Suffix RMS columns for clarity
       rms_cols <- setdiff(names(rms_raw), "time")
       names(rms_raw)[names(rms_raw) != "time"] <- paste0(rms_cols, "_RMS")
       
@@ -684,6 +707,7 @@ read_emg_file <- function(path) {
       readr::write_csv(combined, file)
     }
   )
+  
 }
 
 shinyApp(ui, server)
